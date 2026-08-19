@@ -1,0 +1,100 @@
+services:
+  mongodb:
+    image: mongo:8.0
+    container_name: motor-scoring-mongodb
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - motor_scoring_mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  mongodb-init:
+    image: mongo:8.0
+    container_name: motor-scoring-mongodb-init
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    volumes:
+      - ./docker/mongo/init-replica-set.sh:/init-replica-set.sh:ro
+    entrypoint: ["bash", "/init-replica-set.sh"]
+    restart: "no"
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: motor-scoring-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: "scoring"
+      RABBITMQ_DEFAULT_PASS: "scoring123"
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  kafka:
+    image: apache/kafka:4.3.1
+    container_name: motor-scoring-kafka
+    ports:
+      - "29092:29092"
+    environment:
+      CLUSTER_ID: "4L6g3nShT-eMCtK--X86sw"
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_LISTENERS: "INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:29092"
+      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka:9092,EXTERNAL://localhost:29092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      KAFKA_NUM_PARTITIONS: "1"
+      KAFKA_LOG_DIRS: "/tmp/kraft-combined-logs"
+    restart: unless-stopped
+
+  motor-scoring-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: motor-scoring-api
+    depends_on:
+      mongodb-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: mongodb
+      MONGODB_URI: "mongodb://mongodb:27017/motor_scoring?replicaSet=rs0&directConnection=true"
+      SERVER_PORT: "8080"
+      SCORING_MESSAGING_ENABLED: "true"
+      RABBITMQ_HOST: "rabbitmq"
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USERNAME: "scoring"
+      RABBITMQ_PASSWORD: "scoring123"
+      KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+      SCORING_AUDIT_FILE: "/app/audit/auditoria-scoring.jsonl"
+      SCORING_EMAIL_ENABLED: "false"
+      SCORING_EMAIL_TO: "demo@local.test"
+    volumes:
+      - motor_scoring_audit_data:/app/audit
+    restart: unless-stopped
+
+volumes:
+  motor_scoring_mongodb_data:
+  motor_scoring_audit_data:
