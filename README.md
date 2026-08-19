@@ -123,7 +123,7 @@ flowchart TD
     I --> N[Publisher Kafka]
     N --> O[(Kafka)]
     O --> P[AuditoriaScoringConsumer]
-    P --> Q[/app/audit/auditoria-scoring.jsonl]
+    P --> Q["/app/audit/auditoria-scoring.jsonl"]
 ```
 
 El punto importante es que RabbitMQ y Kafka se ejecutan después de completar la evaluación.
